@@ -1,0 +1,44 @@
+name: Weekly Google Trends Report
+
+on:
+  schedule:
+    # Run at 9:00 UTC every Monday
+    - cron: '0 9 * * 1'
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  generate-report:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+      
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      
+      - name: Create directories
+        run: mkdir -p output logs
+      
+      - name: Create .env file
+        run: |
+          echo "EMAIL_SENDER=${{ secrets.EMAIL_SENDER }}" > .env
+          echo "EMAIL_PASSWORD=${{ secrets.EMAIL_PASSWORD }}" >> .env
+          echo "EMAIL_RECIPIENT=${{ secrets.EMAIL_RECIPIENT }}" >> .env
+          echo "SMTP_SERVER=smtp.gmail.com" >> .env
+          echo "SMTP_PORT=587" >> .env
+          echo "REGION=US" >> .env
+      
+      - name: Generate report
+        run: python src/main.py --type weekly
+      
+      - name: Upload report as artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: google-trends-weekly-report
+          path: output/*.xlsx
+          retention-days: 30

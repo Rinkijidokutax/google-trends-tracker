@@ -1,0 +1,55 @@
+name: Monthly Google Trends Report
+
+on:
+  schedule:
+    # Run at 10:00 UTC on the 1st of every month
+    - cron: '0 10 1 * *'
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  generate-report:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+      
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      
+      - name: Create directories
+        run: mkdir -p output logs
+      
+      - name: Create .env file
+        run: |
+          echo "EMAIL_SENDER=${{ secrets.EMAIL_SENDER }}" > .env
+          echo "EMAIL_PASSWORD=${{ secrets.EMAIL_PASSWORD }}" >> .env
+          echo "EMAIL_RECIPIENT=${{ secrets.EMAIL_RECIPIENT }}" >> .env
+          echo "SMTP_SERVER=smtp.gmail.com" >> .env
+          echo "SMTP_PORT=587" >> .env
+          echo "REGION=US" >> .env
+      
+      - name: Generate report
+        run: python src/main.py --type monthly
+      
+      - name: Upload report as artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: google-trends-monthly-report
+          path: output/*.xlsx
+          retention-days: 90
+      
+      # Optional: Commit monthly report to repository
+      - name: Commit monthly report to repository
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          mkdir -p reports/monthly
+          cp output/*.xlsx reports/monthly/
+          git add reports/monthly/
+          git commit -m "Add monthly Google Trends report for $(date +'%Y-%m')" || echo "No changes to commit"
+          git push
