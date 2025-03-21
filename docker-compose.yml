@@ -1,0 +1,13 @@
+version: '3'
+
+services:
+  google-trends-tracker:
+    build: .
+    container_name: google-trends-tracker
+    volumes:
+      - ./output:/app/output
+      - ./logs:/app/logs
+      - ./.env:/app/.env
+    restart: unless-stopped
+    environment:
+      - TZ=UTC  # Set your timezone here
