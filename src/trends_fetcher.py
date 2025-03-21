@@ -1,203 +1,174 @@
-import time
+import os
 import pandas as pd
 from pytrends.request import TrendReq
-from datetime import datetime
-import logging
-from config import REGION, TIME_PERIODS, STOCK_KEYWORDS
+import numpy as np
+import matplotlib.pyplot as plt
+from typing import List, Dict, Any
 
-class GoogleTrendsFetcher:
-    def __init__(self, region=REGION):
+class AdvancedTrendsFetcher:
+    def __init__(self, 
+                 regions: List[str] = ['US'], 
+                 categories: List[str] = None,
+                 output_dir: str = 'trends_output'):
+        """
+        Initialize Advanced Trends Fetcher
+        
+        :param regions: List of region codes (e.g., ['US', 'GB', 'CA'])
+        :param categories: Optional list of Google Trends categories
+        :param output_dir: Directory to save output files
+        """
         self.pytrends = TrendReq(hl='en-US', tz=360)
-        self.region = region
-        self.logger = logging.getLogger(__name__)
-    
-    def fetch_trending_searches(self, period="daily"):
-        """
-        Fetch trending searches for a specific time period.
+        self.regions = regions
+        self.categories = categories or []
+        self.output_dir = output_dir
         
-        Args:
-            period (str): 'daily', 'weekly', or 'monthly'
-            
-        Returns:
-            pandas.DataFrame: DataFrame with trending searches
+        # Create output directory if it doesn't exist
+        os.makedirs(output_dir, exist_ok=True)
+
+    def fetch_top_keywords(self, 
+                           timeframe: str = 'now 1-d', 
+                           top_n: int = 50) -> pd.DataFrame:
         """
-        try:
-            self.logger.info(f"Fetching {period} trending searches for region {self.region}")
-            
-            if period == "daily":
-                trends_df = self.pytrends.trending_searches(pn=self.region)
-                trends_df.columns = ['Search Term']
-                trends_df['Rank'] = range(1, len(trends_df) + 1)
-                trends_df = trends_df[['Rank', 'Search Term']]
-            else:
-                # For weekly and monthly, we need to use different approach
-                # Get top 20 trending searches for specified period
-                time_frame = TIME_PERIODS[period]
-                self.pytrends.build_payload(kw_list=[''], timeframe=time_frame, geo=self.region)
-                trends_df = self.pytrends.trending_searches(pn=self.region)
-                trends_df.columns = ['Search Term']
-                trends_df['Rank'] = range(1, len(trends_df) + 1)
-                trends_df = trends_df[['Rank', 'Search Term']]
-            
-            trends_df['Period'] = period.capitalize()
-            trends_df['Date'] = datetime.now().strftime("%Y-%m-%d")
-            
-            return trends_df
+        Fetch top keywords across multiple regions
         
-        except Exception as e:
-            self.logger.error(f"Error fetching {period} trending searches: {str(e)}")
-            # Return empty DataFrame with correct columns
-            return pd.DataFrame(columns=['Rank', 'Search Term', 'Period', 'Date'])
-    
-    def fetch_stock_market_trends(self, keywords=STOCK_KEYWORDS, time_periods=TIME_PERIODS):
+        :param timeframe: Google Trends timeframe
+        :param top_n: Number of top keywords to return
+        :return: DataFrame with top keywords
         """
-        Fetch stock market related search trends.
+        top_keywords_list = []
         
-        Args:
-            keywords (list): List of stock market related keywords to track
-            time_periods (dict): Dictionary of time periods to fetch data for
-            
-        Returns:
-            dict: Dictionary of DataFrames with stock market trends by period
-        """
-        results = {}
-        
-        for period_name, timeframe in time_periods.items():
+        # Fetch top keywords for each region
+        for region in self.regions:
             try:
-                self.logger.info(f"Fetching stock market trends for {period_name} period")
+                # Daily trending searches
+                daily_trends = self.pytrends.trending_searches(pn=region)
                 
-                # We can only fetch 5 keywords at a time
-                all_data = []
+                # Add region column
+                daily_trends['region'] = region
+                daily_trends = daily_trends.head(top_n)
                 
-                for i in range(0, len(keywords), 5):
-                    batch_keywords = keywords[i:i+5]
-                    
-                    # Wait between requests to avoid rate limiting
-                    if i > 0:
-                        time.sleep(1)
-                    
-                    self.pytrends.build_payload(
-                        kw_list=batch_keywords,
-                        cat=0,  # Category: All categories
-                        timeframe=timeframe,
-                        geo=self.region,
-                        gprop=''  # Search type: web searches
-                    )
-                    
-                    interest_over_time = self.pytrends.interest_over_time()
-                    
-                    if not interest_over_time.empty:
-                        all_data.append(interest_over_time)
+                top_keywords_list.append(daily_trends)
+            except Exception as e:
+                print(f"Error fetching trends for {region}: {e}")
+        
+        # Combine results from all regions
+        if top_keywords_list:
+            top_keywords_df = pd.concat(top_keywords_list, ignore_index=True)
+            
+            # Save to CSV
+            output_path = os.path.join(self.output_dir, 'top_keywords.csv')
+            top_keywords_df.to_csv(output_path, index=False)
+            
+            return top_keywords_df
+        
+        return pd.DataFrame()
+
+    def analyze_keyword_demographics(self, 
+                                     keywords: List[str], 
+                                     timeframe: str = 'today 3-m') -> Dict[str, Any]:
+        """
+        Analyze demographic trends for given keywords
+        
+        :param keywords: List of keywords to analyze
+        :param timeframe: Google Trends timeframe
+        :return: Dictionary of demographic insights
+        """
+        demographic_insights = {}
+        
+        for keyword in keywords:
+            try:
+                # Fetch interest by region
+                self.pytrends.build_payload([keyword], timeframe=timeframe)
+                interest_by_region = self.pytrends.interest_by_region(resolution='REGION')
                 
-                if all_data:
-                    # Merge all data
-                    combined_df = pd.concat(all_data, axis=1)
-                    # Remove duplicated date index
-                    combined_df = combined_df.loc[:,~combined_df.columns.duplicated()]
-                    # Drop isPartial column if exists
-                    if 'isPartial' in combined_df.columns:
-                        combined_df = combined_df.drop(columns=['isPartial'])
-                    
-                    results[period_name] = combined_df
-                else:
-                    self.logger.warning(f"No data returned for {period_name} period")
-                    results[period_name] = pd.DataFrame()
+                # Fetch interest over time
+                interest_over_time = self.pytrends.interest_over_time()
+                
+                # Analyze top regions
+                top_regions = interest_by_region.nlargest(10, keyword)
+                
+                # Visualize regional interest
+                plt.figure(figsize=(12, 6))
+                top_regions[keyword].plot(kind='bar')
+                plt.title(f'Top Regions - {keyword} Interest')
+                plt.xlabel('Regions')
+                plt.ylabel('Interest Score')
+                plt.tight_layout()
+                plt.savefig(os.path.join(self.output_dir, f'{keyword}_regional_interest.png'))
+                plt.close()
+                
+                # Store insights
+                demographic_insights[keyword] = {
+                    'top_regions': top_regions,
+                    'time_series': interest_over_time
+                }
+                
+                # Save detailed insights to CSV
+                top_regions.to_csv(os.path.join(self.output_dir, f'{keyword}_top_regions.csv'))
+                interest_over_time.to_csv(os.path.join(self.output_dir, f'{keyword}_time_series.csv'))
             
             except Exception as e:
-                self.logger.error(f"Error fetching stock market trends for {period_name} period: {str(e)}")
-                results[period_name] = pd.DataFrame()
+                print(f"Error analyzing demographics for {keyword}: {e}")
         
-        return results
+        return demographic_insights
+
+    def generate_comprehensive_report(self, 
+                                      keywords: List[str] = None, 
+                                      timeframe: str = 'today 3-m'):
+        """
+        Generate a comprehensive trends report
+        
+        :param keywords: Optional list of keywords to deep dive
+        :param timeframe: Google Trends timeframe
+        """
+        # Fetch top keywords if not provided
+        if not keywords:
+            top_keywords_df = self.fetch_top_keywords()
+            keywords = top_keywords_df['title'].tolist()[:50]
+        
+        # Analyze demographic trends
+        demographic_insights = self.analyze_keyword_demographics(keywords, timeframe)
+        
+        # Create a summary report
+        report_df = pd.DataFrame(columns=['Keyword', 'Top Regions', 'Peak Interest'])
+        
+        for keyword, insights in demographic_insights.items():
+            top_regions = insights['top_regions']
+            time_series = insights['time_series']
+            
+            report_df = report_df.append({
+                'Keyword': keyword,
+                'Top Regions': ', '.join(top_regions.index[:5]),
+                'Peak Interest': time_series[keyword].max()
+            }, ignore_index=True)
+        
+        # Save summary report
+        report_df.to_csv(os.path.join(self.output_dir, 'trends_summary_report.csv'), index=False)
+        
+        print(f"Comprehensive report generated in {self.output_dir}")
+
+def main():
+    """
+    Main function to run trends fetcher
+    """
+    # Initialize fetcher
+    trends_fetcher = AdvancedTrendsFetcher(
+        regions=['US', 'GB', 'CA'],
+        output_dir='google_trends_output'
+    )
     
-    def fetch_related_queries(self, keywords=STOCK_KEYWORDS, time_periods=TIME_PERIODS):
-        """
-        Fetch related queries for stock market keywords.
-        
-        Args:
-            keywords (list): List of stock market related keywords to track
-            time_periods (dict): Dictionary of time periods to fetch data for
-            
-        Returns:
-            dict: Dictionary of related queries by keyword and period
-        """
-        results = {}
-        
-        for period_name, timeframe in time_periods.items():
-            results[period_name] = {}
-            
-            for keyword in keywords:
-                try:
-                    self.logger.info(f"Fetching related queries for '{keyword}' ({period_name})")
-                    
-                    # Wait between requests to avoid rate limiting
-                    time.sleep(0.5)
-                    
-                    self.pytrends.build_payload(
-                        kw_list=[keyword],
-                        cat=0,
-                        timeframe=timeframe,
-                        geo=self.region,
-                        gprop=''
-                    )
-                    
-                    related_queries = self.pytrends.related_queries()
-                    
-                    if related_queries and keyword in related_queries:
-                        # Get top and rising queries
-                        top_df = related_queries[keyword]['top']
-                        rising_df = related_queries[keyword]['rising']
-                        
-                        results[period_name][keyword] = {
-                            'top': top_df if isinstance(top_df, pd.DataFrame) else pd.DataFrame(),
-                            'rising': rising_df if isinstance(rising_df, pd.DataFrame) else pd.DataFrame()
-                        }
-                    else:
-                        self.logger.warning(f"No related queries for '{keyword}' ({period_name})")
-                        results[period_name][keyword] = {
-                            'top': pd.DataFrame(),
-                            'rising': pd.DataFrame()
-                        }
-                
-                except Exception as e:
-                    self.logger.error(f"Error fetching related queries for '{keyword}' ({period_name}): {str(e)}")
-                    results[period_name][keyword] = {
-                        'top': pd.DataFrame(),
-                        'rising': pd.DataFrame()
-                    }
-        
-        return results
+    # Example keywords for stock market and crypto
+    stock_keywords = [
+        'Tesla stock', 'Bitcoin', 'Ethereum', 
+        'Stock market', 'Cryptocurrency', 
+        'Investment trends'
+    ]
     
-    def fetch_all_data(self):
-        """
-        Fetch all Google Trends data.
-        
-        Returns:
-            dict: Dictionary containing all fetched data
-        """
-        try:
-            self.logger.info("Starting to fetch all Google Trends data")
-            
-            # Fetch trending searches for different time periods
-            daily_trends = self.fetch_trending_searches("daily")
-            weekly_trends = self.fetch_trending_searches("weekly")
-            monthly_trends = self.fetch_trending_searches("monthly")
-            
-            # Fetch stock market related trends
-            stock_trends = self.fetch_stock_market_trends()
-            
-            # Fetch related queries for stock market keywords
-            related_queries = self.fetch_related_queries()
-            
-            return {
-                "trending_searches": {
-                    "daily": daily_trends,
-                    "weekly": weekly_trends,
-                    "monthly": monthly_trends
-                },
-                "stock_trends": stock_trends,
-                "related_queries": related_queries
-            }
-        
-        except Exception as e:
-            self.logger.error(f"Error fetching all data: {str(e)}")
-            return None
+    # Generate comprehensive report
+    trends_fetcher.generate_comprehensive_report(
+        keywords=stock_keywords, 
+        timeframe='today 3-m'
+    )
+
+if __name__ == '__main__':
+    main()
