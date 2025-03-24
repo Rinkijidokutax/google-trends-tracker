@@ -4,6 +4,7 @@ from pytrends.request import TrendReq
 import numpy as np
 import matplotlib.pyplot as plt
 from typing import List, Dict, Any
+import time
 
 class AdvancedTrendsFetcher:
     def __init__(self, 
@@ -48,6 +49,9 @@ class AdvancedTrendsFetcher:
                 daily_trends = daily_trends.head(top_n)
                 
                 top_keywords_list.append(daily_trends)
+                
+                # Add a small delay to avoid rate limiting
+                time.sleep(1)
             except Exception as e:
                 print(f"Error fetching trends for {region}: {e}")
         
@@ -77,6 +81,8 @@ class AdvancedTrendsFetcher:
         
         for keyword in keywords:
             try:
+                print(f"Fetching data for: {keyword}")
+                
                 # Fetch interest by region
                 self.pytrends.build_payload([keyword], timeframe=timeframe)
                 interest_by_region = self.pytrends.interest_by_region(resolution='REGION')
@@ -106,9 +112,14 @@ class AdvancedTrendsFetcher:
                 # Save detailed insights to CSV
                 top_regions.to_csv(os.path.join(self.output_dir, f'{keyword}_top_regions.csv'))
                 interest_over_time.to_csv(os.path.join(self.output_dir, f'{keyword}_time_series.csv'))
+                
+                # Add a small delay to avoid rate limiting
+                time.sleep(1)
             
             except Exception as e:
                 print(f"Error analyzing demographics for {keyword}: {e}")
+                # Continue with other keywords even if one fails
+                continue
         
         return demographic_insights
 
@@ -130,17 +141,20 @@ class AdvancedTrendsFetcher:
         demographic_insights = self.analyze_keyword_demographics(keywords, timeframe)
         
         # Create a summary report
-        report_df = pd.DataFrame(columns=['Keyword', 'Top Regions', 'Peak Interest'])
+        report_data = []
         
         for keyword, insights in demographic_insights.items():
             top_regions = insights['top_regions']
             time_series = insights['time_series']
             
-            report_df = report_df.append({
+            report_data.append({
                 'Keyword': keyword,
                 'Top Regions': ', '.join(top_regions.index[:5]),
-                'Peak Interest': time_series[keyword].max()
-            }, ignore_index=True)
+                'Peak Interest': time_series[keyword].max() if not time_series.empty else 0
+            })
+        
+        # Convert to DataFrame
+        report_df = pd.DataFrame(report_data)
         
         # Save summary report
         report_df.to_csv(os.path.join(self.output_dir, 'trends_summary_report.csv'), index=False)
